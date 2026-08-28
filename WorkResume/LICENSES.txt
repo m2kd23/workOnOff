@@ -1,0 +1,21 @@
+[WorkResume 오픈소스 라이선스 검증서]
+
+WorkResume 프로그램은 공공기관 내부망 업무 사용 목적에 적합하도록 외부 라이브러리 사용을 전면 배제하고 개발되었습니다.
+
+1. 외부 라이브러리 (NuGet 등) 사용 현황
+- 본 프로그램은 외부 NuGet 패키지, 상용 컴포넌트 또는 GPL 등 소스코드 공개 의무가 발생하는 외부 오픈소스 라이브러리를 일절 사용하지 않았습니다.
+- 100% Microsoft .NET Framework 4.8 표준 클래스 라이브러리(FCL) 및 Windows Native API만을 사용하여 자체 개발되었습니다.
+
+2. 자체 코드 라이선스
+- WorkResume의 자체 소스코드는 MIT License를 적용합니다. 공공기관, 기업, 개인 등 누구나 제한 없이 자유롭게 수정, 배포 및 상업적/비상업적으로 사용할 수 있습니다.
+
+3. 내장 표준 어셈블리 정보
+- System.dll
+- System.Core.dll
+- System.Windows.Forms.dll (Windows Forms)
+- System.Drawing.dll (GDI+)
+- System.Web.Extensions.dll (JavaScriptSerializer - JSON 처리용)
+- Wscript.Shell (Windows Script Host Object Model - LNK 숏컷 파싱용)
+- Shell.Application (Shell32 - 탐색기 폴더 쿼리용)
+
+위 모든 라이브러리는 Windows OS 및 .NET Framework의 기본 구성요소로, 별도의 추가 라이선스 취득이나 비용 지불이 필요하지 않습니다.

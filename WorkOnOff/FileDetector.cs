@@ -4,10 +4,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Windows.Automation;
 
 public class DetectedItem
 {
-    public string Type { get; set; } // "File" or "Folder"
+    public string Type { get; set; } // "File", "Folder" or "Browser"
     public string FilePath { get; set; }
     public string FileName { get; set; }
     public string Extension { get; set; }
@@ -42,7 +43,10 @@ public static class FileDetector
         // 2. Windows 탐색기 폴더 탐색 (Shell API)
         DetectExplorerFolders(result, uniquePaths);
 
-        // 3. 기타 파일 형식 (PDF, TXT, CSV 등) 탐색 (MainWindowTitle + Recent Files + Common Folders)
+        // 3. 브라우저의 현재 주소 탐색 (Windows UI Automation)
+        DetectBrowsers(result, uniquePaths);
+
+        // 4. 기타 파일 형식 (PDF, TXT, CSV 등) 탐색 (MainWindowTitle + Recent Files + Common Folders)
         DetectOtherFiles(result, uniquePaths);
 
         Logger.Write(string.Format("탐색 완료: 총 {0}개 항목 발견", result.Count));
@@ -210,6 +214,105 @@ public static class FileDetector
         }
     }
 
+    private static void DetectBrowsers(List<DetectedItem> result, HashSet<string> uniquePaths)
+    {
+        string[] browserProcessNames = { "msedge", "chrome", "firefox", "brave", "iexplore" };
+
+        foreach (Process process in Process.GetProcesses())
+        {
+            try
+            {
+                bool isBrowser = false;
+                foreach (string name in browserProcessNames)
+                {
+                    if (process.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isBrowser = true;
+                        break;
+                    }
+                }
+                if (!isBrowser || process.MainWindowHandle == IntPtr.Zero) continue;
+
+                string address = GetBrowserAddress(process.MainWindowHandle);
+                if (string.IsNullOrEmpty(address)) continue;
+
+                string executablePath = GetProcessExecutablePath(process);
+                string displayName = GetBrowserDisplayName(process.MainWindowTitle, address);
+                AddBrowserItem(address, displayName, executablePath, result, uniquePaths);
+            }
+            catch {}
+        }
+    }
+
+    // Chrome/Edge 등은 열린 탭 목록을 제공하는 공용 COM API가 없으므로,
+    // 각 브라우저 창의 주소 표시줄(UI Automation)을 읽어 현재 선택된 탭을 저장한다.
+    private static string GetBrowserAddress(IntPtr windowHandle)
+    {
+        try
+        {
+            AutomationElement window = AutomationElement.FromHandle(windowHandle);
+            AutomationElementCollection edits = window.FindAll(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+
+            foreach (AutomationElement edit in edits)
+            {
+                object pattern;
+                if (!edit.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) continue;
+
+                string value = ((ValuePattern)pattern).Current.Value;
+                string normalized;
+                if (TryNormalizeBrowserAddress(value, out normalized))
+                {
+                    return normalized;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("브라우저 주소 탐색 중 오류: " + ex.Message, "WARN");
+        }
+        return null;
+    }
+
+    private static string GetProcessExecutablePath(Process process)
+    {
+        try
+        {
+            return process.MainModule.FileName;
+        }
+        catch
+        {
+            return process.ProcessName + ".exe";
+        }
+    }
+
+    private static string GetBrowserDisplayName(string windowTitle, string address)
+    {
+        string title = string.IsNullOrEmpty(windowTitle) ? "" : windowTitle.Trim();
+        string[] suffixes = { " - Microsoft Edge", " - Google Chrome", " - Mozilla Firefox", " - Brave" };
+        foreach (string suffix in suffixes)
+        {
+            if (title.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                title = title.Substring(0, title.Length - suffix.Length).Trim();
+                break;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(title)) return title;
+
+        try
+        {
+            Uri uri = new Uri(address);
+            return string.IsNullOrEmpty(uri.Host) ? address : uri.Host;
+        }
+        catch
+        {
+            return address;
+        }
+    }
+
     private static void DetectOtherFiles(List<DetectedItem> result, HashSet<string> uniquePaths)
     {
         try
@@ -306,6 +409,127 @@ public static class FileDetector
             PreferredApplication = preferredApp,
             Exists = File.Exists(path)
         });
+    }
+
+    private static void AddBrowserItem(string address, string displayName, string preferredApplication, List<DetectedItem> result, HashSet<string> uniquePaths)
+    {
+        DetectedItem item;
+        string error;
+        if (!TryCreateBrowserItem(address, displayName, preferredApplication, out item, out error)) return;
+        if (uniquePaths.Contains(item.FilePath)) return;
+
+        uniquePaths.Add(item.FilePath);
+        result.Add(item);
+        Logger.Write("브라우저 탭 감지: " + item.FileName);
+    }
+
+    public static bool TryCreateBrowserItem(string address, string displayName, out DetectedItem item, out string error)
+    {
+        return TryCreateBrowserItem(address, displayName, "", out item, out error);
+    }
+
+    private static bool TryCreateBrowserItem(string address, string displayName, string preferredApplication, out DetectedItem item, out string error)
+    {
+        item = null;
+        error = null;
+
+        string normalizedAddress;
+        if (!TryNormalizeBrowserAddress(address, out normalizedAddress))
+        {
+            error = "http:// 또는 https://로 시작하는 올바른 웹 주소를 입력해주세요.";
+            return false;
+        }
+
+        string name = string.IsNullOrEmpty(displayName) ? GetBrowserDisplayName("", normalizedAddress) : displayName.Trim();
+        item = new DetectedItem
+        {
+            Type = "Browser",
+            FilePath = normalizedAddress,
+            FileName = name,
+            Extension = "",
+            PreferredApplication = preferredApplication ?? "",
+            Exists = true,
+            IsSelected = true
+        };
+        return true;
+    }
+
+    public static bool IsBrowserAddress(string address)
+    {
+        string normalizedAddress;
+        return TryNormalizeBrowserAddress(address, out normalizedAddress);
+    }
+
+    private static bool TryNormalizeBrowserAddress(string address, out string normalizedAddress)
+    {
+        normalizedAddress = null;
+        if (string.IsNullOrEmpty(address)) return false;
+
+        string value = address.Trim();
+        if (value.IndexOf("://", StringComparison.Ordinal) < 0 &&
+            !value.StartsWith("about:", StringComparison.OrdinalIgnoreCase))
+        {
+            value = "https://" + value;
+        }
+
+        Uri uri;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out uri)) return false;
+
+        string scheme = uri.Scheme.ToLowerInvariant();
+        if (scheme != "http" && scheme != "https" && scheme != "file" &&
+            scheme != "chrome" && scheme != "edge" && scheme != "about")
+        {
+            return false;
+        }
+
+        if ((scheme == "http" || scheme == "https") && string.IsNullOrEmpty(uri.Host)) return false;
+        normalizedAddress = uri.AbsoluteUri;
+        return true;
+    }
+
+    public static void OpenBrowserAddress(string address, string preferredApplication)
+    {
+        if (!IsBrowserAddress(address))
+        {
+            throw new ArgumentException("유효하지 않은 브라우저 주소입니다.", "address");
+        }
+
+        if (!string.IsNullOrEmpty(preferredApplication))
+        {
+            try
+            {
+                ProcessStartInfo browserInfo = new ProcessStartInfo
+                {
+                    FileName = preferredApplication,
+                    Arguments = QuoteArgument(address),
+                    UseShellExecute = true
+                };
+                Process.Start(browserInfo);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Logger.Write("저장된 브라우저로 열기 실패, 기본 브라우저로 다시 시도: " + ex.Message, "WARN");
+            }
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = address,
+            UseShellExecute = true
+        });
+    }
+
+    public static string GetItemTypeLabel(string type, string extension)
+    {
+        if (type == "Folder") return "폴더";
+        if (type == "Browser") return "브라우저";
+        return string.IsNullOrEmpty(extension) ? "파일" : extension.ToUpper().Replace(".", "");
+    }
+
+    private static string QuoteArgument(string value)
+    {
+        return "\"" + value.Replace("\"", "\\\"") + "\"";
     }
 
     private static string ExtractFileNameFromTitle(string title)

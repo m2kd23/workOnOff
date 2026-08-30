@@ -1,6 +1,6 @@
-# WorkResume 아키텍처 개요 (ARCHITECTURE.md)
+# WorkOnOff 아키텍처 개요 (ARCHITECTURE.md)
 
-이 문서는 WorkResume 프로그램의 구조, 탐색 알고리즘, 세션 영속화 및 재실행 방식의 기술적 상세 내용을 다룹니다.
+이 문서는 WorkOnOff 프로그램의 구조, 탐색 알고리즘, 세션 영속화 및 재실행 방식의 기술적 상세 내용을 다룹니다.
 
 ---
 
@@ -16,11 +16,12 @@ graph TD
     
     B -->|COM ROT| E[Excel, Word, PPT, HWP]
     B -->|Shell.Application| F[Windows Explorer Folders]
-    B -->|Window Title & LNK| G[Acrobat, Notepad, Edge, Chrome]
+    B -->|UI Automation| G[Edge, Chrome, Firefox, Brave current tab URL]
+    B -->|Window Title & LNK| H[Acrobat, Notepad, browser PDF]
     
-    C -->|JSON| H[%LOCALAPPDATA%\WorkResume\sessions.json]
+    C -->|JSON| I[%LOCALAPPDATA%\WorkOnOff\sessions.json]
     
-    D -->|Process.Start| I[기본 연결 프로그램 재기동]
+    D -->|Process.Start| J[기본 연결 프로그램 재기동]
 ```
 
 ---
@@ -42,7 +43,13 @@ graph TD
 - **기법**: `Type.GetTypeFromProgID("Shell.Application")`을 통하여 Shell 인스턴스를 구하고, `Windows()` 컬렉션을 받아옵니다.
 - **경로 추출**: 창의 `FullName`이 `explorer.exe`인 윈도우 인스턴스를 필터링하고, `LocationURL` 프로퍼티를 Uri 클래스로 변환하여 로컬 디렉토리 경로(`C:\...`)를 복구해 냅니다.
 
-### C. 창 제목(Window Title) & 최근 문서(Recent LNK) 매칭 탐색 (PDF, 메모장 등)
+### C. 브라우저 주소 표시줄(UI Automation) 탐색
+- **대상**: Microsoft Edge, Google Chrome, Firefox, Brave, Internet Explorer의 화면에 표시된 브라우저 창입니다.
+- **기법**: 표준 .NET Framework의 Windows UI Automation으로 브라우저 창 안의 주소 입력 컨트롤을 읽어, 현재 선택된 탭의 URL을 `Browser` 항목으로 저장합니다.
+- **복원**: 저장 시 사용 중이던 브라우저 실행 파일로 해당 URL을 우선 실행하고, 브라우저가 제거된 경우에는 Windows 기본 브라우저로 열도록 폴백합니다.
+- **보완 수단**: 보안 프로그램이나 브라우저 접근성 설정 때문에 주소를 읽지 못한 탭은 UI의 **[브라우저 URL 추가]** 버튼으로 직접 넣을 수 있습니다.
+
+### D. 창 제목(Window Title) & 최근 문서(Recent LNK) 매칭 탐색 (PDF, 메모장 등)
 - **문제점**: Adobe Reader, Chrome, Edge, 메모장은 문서 탐색용 표준 COM 인터페이스가 없거나 제한적입니다.
 - **해결책**:
   1. 감시 프로세스 목록(`notepad`, `AcroRd32`, `Acrobat`, `msedge`, `chrome` 등)을 필터링하여 `MainWindowTitle`을 가져옵니다.
@@ -70,3 +77,4 @@ graph TD
   - 파일 실행 전 `File.Exists(path)` 및 `Directory.Exists(path)` 검사를 통해 파일 존재 유무를 먼저 검사합니다.
   - 파일이 존재하지 않거나 액세스 권한이 상실된 경우, 프로그램을 다운시키지 않고 오류 목록 컬렉션에 추가한 뒤 다음 루프로 넘어갑니다.
   - 전체 파일 실행 루프가 끝나면 한꺼번에 복원에 실패한 파일명 목록을 사용자에게 알리고, 로그에 원인을 기록합니다.
+- **브라우저 URL**: 로컬 파일 존재 여부 대신 URL 형식만 확인한 뒤 실행합니다.

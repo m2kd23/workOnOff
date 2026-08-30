@@ -5,7 +5,7 @@ using System.Web.Script.Serialization;
 
 public class SessionItem
 {
-    public string Type { get; set; } // "File" or "Folder"
+    public string Type { get; set; } // "File", "Folder" or "Browser"
     public string FilePath { get; set; }
     public string FileName { get; set; }
     public string Extension { get; set; }
@@ -32,10 +32,15 @@ public static class SessionManager
 {
     private static readonly string SessionDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        @"WorkResume"
+        @"WorkOnOff"
     );
 
     private static readonly string SessionFilePath = Path.Combine(SessionDirectory, "sessions.json");
+
+    private static readonly string LegacySessionFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        @"WorkResume\sessions.json"
+    );
 
     static SessionManager()
     {
@@ -44,6 +49,13 @@ public static class SessionManager
             if (!Directory.Exists(SessionDirectory))
             {
                 Directory.CreateDirectory(SessionDirectory);
+            }
+
+            // 프로그램명 변경 전 저장한 업무 세션을 한 번만 새 폴더로 가져온다.
+            if (!File.Exists(SessionFilePath) && File.Exists(LegacySessionFilePath))
+            {
+                File.Copy(LegacySessionFilePath, SessionFilePath);
+                Logger.Write("기존 WorkResume 업무 세션을 WorkOnOff로 이전했습니다.");
             }
         }
         catch {}
@@ -78,6 +90,11 @@ public static class SessionManager
                     else if (item.Type == "Folder")
                     {
                         item.Exists = Directory.Exists(item.FilePath);
+                    }
+                    else if (item.Type == "Browser")
+                    {
+                        // URL은 로컬 파일처럼 존재 여부를 확인할 수 없으므로 형식만 확인한다.
+                        item.Exists = FileDetector.IsBrowserAddress(item.FilePath);
                     }
                 }
             }

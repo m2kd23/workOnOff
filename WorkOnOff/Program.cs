@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace WorkResume
+namespace WorkOnOff
 {
     static class Program
     {
@@ -27,7 +27,7 @@ namespace WorkResume
 
             // 12. 싱글 인스턴스 실행 보장 (중복 실행 방지)
             bool createdNew;
-            using (Mutex mutex = new Mutex(true, "WorkResumeSingleInstanceMutex", out createdNew))
+            using (Mutex mutex = new Mutex(true, "WorkOnOffSingleInstanceMutex", out createdNew))
             {
                 if (!createdNew)
                 {
@@ -49,9 +49,41 @@ namespace WorkResume
                     return;
                 }
 
-                Logger.Write("WorkResume 시작");
+                Logger.Write("WorkOnOff 시작");
+                CreateDesktopShortcutIfNeeded();
                 Application.Run(new MainForm());
-                Logger.Write("WorkResume 종료");
+                Logger.Write("WorkOnOff 종료");
+            }
+        }
+
+        private static void CreateDesktopShortcutIfNeeded()
+        {
+            try
+            {
+                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                string shortcutPath = Path.Combine(desktopPath, "WorkOnOFF 업무 바로 이어하기.lnk");
+
+                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                if (shellType == null)
+                {
+                    Logger.Write("바탕화면 바로가기 생성에 필요한 Windows Shell을 찾을 수 없습니다.", "WARN");
+                    return;
+                }
+
+                dynamic shell = Activator.CreateInstance(shellType);
+                dynamic shortcut = shell.CreateShortcut(shortcutPath);
+                shortcut.TargetPath = Application.ExecutablePath;
+                shortcut.WorkingDirectory = Path.GetDirectoryName(Application.ExecutablePath);
+                shortcut.Description = "WorkOnOFF 업무 바로 이어하기";
+                shortcut.IconLocation = Application.ExecutablePath + ",0";
+                shortcut.Hotkey = "CTRL+SHIFT+1";
+                shortcut.Save();
+
+                Logger.Write("바탕화면 바로가기 생성/업데이트 완료: " + shortcutPath);
+            }
+            catch (Exception ex)
+            {
+                Logger.Write("바탕화면 바로가기 생성 실패: " + ex.Message, "WARN");
             }
         }
     }
@@ -59,21 +91,6 @@ namespace WorkResume
     // 메인 화면 UI
     public class MainForm : Form
     {
-        [DllImport("user32.dll")]
-        private static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
-
-        [DllImport("user32.dll")]
-        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-        private const int MOD_CONTROL = 0x0002;
-        private const int MOD_SHIFT = 0x0004;
-        private const int KEY_1 = 0x31;
-        private const int HOTKEY_ID = 9000;
-        private const int WM_HOTKEY = 0x0312;
-
         private Label lblTitle;
         private Label lblOpenedWork;
         private ListView lvOpenedItems;
@@ -81,6 +98,7 @@ namespace WorkResume
         private Button btnDeselectAll;
         private Button btnAddFile;
         private Button btnAddFolder;
+        private Button btnAddBrowser;
         private Button btnRemoveSelected;
         
         private Label lblMemo;
@@ -108,7 +126,7 @@ namespace WorkResume
 
         private void InitializeComponent()
         {
-            this.Text = "WorkResume - 경량 업무 이어하기";
+            this.Text = "WorkOnOFF 업무 바로 이어하기";
             this.Size = new Size(820, 720);
             this.MinimumSize = new Size(800, 680);
             this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular, GraphicsUnit.Point);
@@ -168,6 +186,9 @@ namespace WorkResume
             pnlOpenActions.Size = new Size(180, 180);
             pnlOpenActions.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
             pnlOpenActions.FlowDirection = FlowDirection.TopDown;
+            // 공간이 부족해도 다음 열로 줄바꿈하지 않아 선택 버튼 옆에 다른 버튼이 겹쳐 보이지 않게 한다.
+            pnlOpenActions.WrapContents = false;
+            pnlOpenActions.AutoScroll = true;
             pnlOpened.Controls.Add(pnlOpenActions);
 
             btnSelectAll = CreateButton("전체 선택", new Size(160, 28));
@@ -185,6 +206,10 @@ namespace WorkResume
             btnAddFolder = CreateButton("폴더 추가", new Size(160, 28));
             btnAddFolder.Click += btnAddFolder_Click;
             pnlOpenActions.Controls.Add(btnAddFolder);
+
+            btnAddBrowser = CreateButton("브라우저 URL 추가", new Size(160, 28));
+            btnAddBrowser.Click += btnAddBrowser_Click;
+            pnlOpenActions.Controls.Add(btnAddBrowser);
 
             btnRemoveSelected = CreateButton("목록에서 삭제", new Size(160, 28));
             btnRemoveSelected.Click += btnRemoveSelected_Click;
@@ -345,7 +370,7 @@ namespace WorkResume
             foreach (var item in currentDetectedItems)
             {
                 ListViewItem lvi = new ListViewItem(item.FileName);
-                lvi.SubItems.Add(item.Type == "Folder" ? "폴더" : item.Extension.ToUpper().Replace(".", ""));
+                lvi.SubItems.Add(FileDetector.GetItemTypeLabel(item.Type, item.Extension));
                 lvi.SubItems.Add(item.FilePath);
                 lvi.SubItems.Add(item.Exists ? "정상" : "⚠ 누락됨");
                 lvi.Checked = item.IsSelected;
@@ -429,6 +454,71 @@ namespace WorkResume
             }
         }
 
+        private void btnAddBrowser_Click(object sender, EventArgs e)
+        {
+            using (Form inputForm = new Form())
+            {
+                inputForm.Text = "브라우저 URL 추가";
+                inputForm.Size = new Size(560, 155);
+                inputForm.MinimumSize = new Size(560, 155);
+                inputForm.MaximumSize = new Size(900, 155);
+                inputForm.StartPosition = FormStartPosition.CenterParent;
+                inputForm.Font = new Font("맑은 고딕", 9F, FontStyle.Regular, GraphicsUnit.Point);
+
+                Label label = new Label();
+                label.Text = "내일 다시 열 웹 주소를 입력하세요. (예: https://intranet.example.com)";
+                label.Location = new Point(12, 12);
+                label.AutoSize = true;
+                inputForm.Controls.Add(label);
+
+                TextBox addressBox = new TextBox();
+                addressBox.Location = new Point(12, 38);
+                addressBox.Size = new Size(520, 23);
+                addressBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                inputForm.Controls.Add(addressBox);
+
+                Button okButton = new Button();
+                okButton.Text = "추가";
+                okButton.Size = new Size(90, 30);
+                okButton.Location = new Point(346, 74);
+                okButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                okButton.DialogResult = DialogResult.OK;
+                inputForm.Controls.Add(okButton);
+
+                Button cancelButton = new Button();
+                cancelButton.Text = "취소";
+                cancelButton.Size = new Size(90, 30);
+                cancelButton.Location = new Point(442, 74);
+                cancelButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                cancelButton.DialogResult = DialogResult.Cancel;
+                inputForm.Controls.Add(cancelButton);
+
+                inputForm.AcceptButton = okButton;
+                inputForm.CancelButton = cancelButton;
+                inputForm.Shown += (s, args) => addressBox.Focus();
+
+                if (inputForm.ShowDialog(this) != DialogResult.OK) return;
+
+                DetectedItem browserItem;
+                string error;
+                if (!FileDetector.TryCreateBrowserItem(addressBox.Text, null, out browserItem, out error))
+                {
+                    MessageBox.Show(error, "주소 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (currentDetectedItems.Exists(i => i.FilePath.Equals(browserItem.FilePath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MessageBox.Show("이미 목록에 추가된 웹 주소입니다.", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                currentDetectedItems.Add(browserItem);
+                PopulateOpenedList();
+                Logger.Write("사용자 수동 브라우저 URL 추가 완료: " + browserItem.FileName);
+            }
+        }
+
         private void btnRemoveSelected_Click(object sender, EventArgs e)
         {
             if (lvOpenedItems.SelectedItems.Count == 0)
@@ -464,8 +554,8 @@ namespace WorkResume
                     "업무 저장 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 DialogResult closeResult = MessageBox.Show(
-                    "저장된 업무에서 사용 중인 프로그램들을 모두 종료하시겠습니까?\n" +
-                    "(저장되지 않은 작업이 있는 경우 종료 중 저장할 수 있는 창이 뜹니다.)",
+                    "저장된 업무의 문서와 폴더 창을 종료하시겠습니까?\n" +
+                    "(브라우저 탭은 자동 종료하지 않으며, 저장되지 않은 작업은 종료 중 저장할 수 있습니다.)",
                     "프로그램 종료 확인",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question
@@ -718,7 +808,7 @@ namespace WorkResume
             {
                 if (!item.IsSelected) continue;
 
-                // 4-6. 파일 존재 여부 확인
+                // 파일/폴더/브라우저 주소 유효성 확인
                 if (item.Type == "File")
                 {
                     if (!File.Exists(item.FilePath))
@@ -735,16 +825,28 @@ namespace WorkResume
                         continue;
                     }
                 }
+                else if (item.Type == "Browser" && !FileDetector.IsBrowserAddress(item.FilePath))
+                {
+                    missingItems.Add("[주소 오류] " + item.FilePath);
+                    continue;
+                }
 
                 // 실행 시도 (ShellExecute 기반)
                 try
                 {
-                    ProcessStartInfo psi = new ProcessStartInfo
+                    if (item.Type == "Browser")
                     {
-                        FileName = item.FilePath,
-                        UseShellExecute = true
-                    };
-                    Process.Start(psi);
+                        FileDetector.OpenBrowserAddress(item.FilePath, item.PreferredApplication);
+                    }
+                    else
+                    {
+                        ProcessStartInfo psi = new ProcessStartInfo
+                        {
+                            FileName = item.FilePath,
+                            UseShellExecute = true
+                        };
+                        Process.Start(psi);
+                    }
                     successCount++;
                 }
                 catch (Exception ex)
@@ -811,46 +913,6 @@ namespace WorkResume
             }
         }
 
-        protected override void OnLoad(EventArgs e)
-        {
-            base.OnLoad(e);
-            bool success = RegisterHotKey(this.Handle, HOTKEY_ID, MOD_CONTROL | MOD_SHIFT, KEY_1);
-            if (success)
-            {
-                Logger.Write("전역 단축키 Ctrl+Shift+1 등록 성공");
-            }
-            else
-            {
-                Logger.Write("전역 단축키 Ctrl+Shift+1 등록 실패 (이미 다른 프로그램이 사용 중)", "WARN");
-            }
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            UnregisterHotKey(this.Handle, HOTKEY_ID);
-            base.OnFormClosing(e);
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HOTKEY_ID)
-            {
-                ActivateMainWindow();
-            }
-            base.WndProc(ref m);
-        }
-
-        private void ActivateMainWindow()
-        {
-            if (this.WindowState == FormWindowState.Minimized)
-            {
-                this.WindowState = FormWindowState.Normal;
-            }
-            this.Show();
-            this.Activate();
-            SetForegroundWindow(this.Handle);
-            Logger.Write("전역 단축키 입력으로 창 활성화");
-        }
     }
 
     // 세션 상세 보기 UI
@@ -956,7 +1018,7 @@ namespace WorkResume
             foreach (var item in session.Items)
             {
                 ListViewItem lvi = new ListViewItem(item.FileName);
-                lvi.SubItems.Add(item.Type == "Folder" ? "폴더" : item.Extension.ToUpper().Replace(".", ""));
+                lvi.SubItems.Add(FileDetector.GetItemTypeLabel(item.Type, item.Extension));
                 lvi.SubItems.Add(item.FilePath);
                 lvi.SubItems.Add(item.Exists ? "정상" : "⚠ 누락됨");
                 lvi.Tag = item;
@@ -985,15 +1047,27 @@ namespace WorkResume
                 MessageBox.Show("폴더가 존재하지 않습니다.", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
+            if (item.Type == "Browser" && !FileDetector.IsBrowserAddress(item.FilePath))
+            {
+                MessageBox.Show("브라우저 주소가 올바르지 않습니다.", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo
+                if (item.Type == "Browser")
                 {
-                    FileName = item.FilePath,
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
+                    FileDetector.OpenBrowserAddress(item.FilePath, item.PreferredApplication);
+                }
+                else
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = item.FilePath,
+                        UseShellExecute = true
+                    };
+                    Process.Start(psi);
+                }
             }
             catch (Exception ex)
             {
@@ -1005,6 +1079,12 @@ namespace WorkResume
         {
             if (lvItems.SelectedItems.Count == 0) return;
             SessionItem item = (SessionItem)lvItems.SelectedItems[0].Tag;
+
+            if (item.Type == "Browser")
+            {
+                MessageBox.Show("브라우저 항목에는 연결된 폴더가 없습니다.", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
             string folder = item.Type == "Folder" ? item.FilePath : Path.GetDirectoryName(item.FilePath);
             if (!Directory.Exists(folder))

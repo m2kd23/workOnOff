@@ -5,7 +5,7 @@ public static class Logger
 {
     private static readonly string LogDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        @"WorkResume\logs"
+        @"WorkOnOff\logs"
     );
 
     static Logger()

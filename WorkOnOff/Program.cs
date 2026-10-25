@@ -91,11 +91,17 @@ namespace WorkOnOff
     // 메인 화면 UI
     public class MainForm : Form
     {
+        // 화면의 업무 동작 버튼에 공통으로 적용할 글꼴 크기와 폭
+        private const float ActionButtonFontSize = 10F;
+        private const int ActionButtonWidth = 240;
+        private const int ActionPanelLeft = 674;
+        private const int WorkListWidth = 664;
+
         private Label lblTitle;
         private Label lblOpenedWork;
         private ListView lvOpenedItems;
-        private Button btnSelectAll;
-        private Button btnDeselectAll;
+        private CheckBox chkToggleAllOpenedItems;
+        private bool isUpdatingToggleAllCheckBox;
         private Button btnAddFile;
         private Button btnAddFolder;
         private Button btnAddBrowser;
@@ -127,8 +133,8 @@ namespace WorkOnOff
         private void InitializeComponent()
         {
             this.Text = "WorkOnOFF 업무 바로 이어하기";
-            this.Size = new Size(820, 720);
-            this.MinimumSize = new Size(800, 680);
+            this.Size = new Size(960, 720);
+            this.MinimumSize = new Size(940, 680);
             this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular, GraphicsUnit.Point);
             this.StartPosition = FormStartPosition.CenterScreen;
 
@@ -160,7 +166,7 @@ namespace WorkOnOff
             mainLayout.Controls.Add(pnlOpened, 0, 1);
 
             lblOpenedWork = new Label();
-            lblOpenedWork.Text = "현재 열려 있는 업무 목록 (체크박스를 선택하세요)";
+            lblOpenedWork.Text = "현재 열려 있는 업무 목록 (이름 왼쪽 체크박스로 전체 선택/해제)";
             lblOpenedWork.Location = new Point(0, 0);
             lblOpenedWork.AutoSize = true;
             lblOpenedWork.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
@@ -168,54 +174,56 @@ namespace WorkOnOff
 
             lvOpenedItems = new ListView();
             lvOpenedItems.Location = new Point(0, 20);
-            lvOpenedItems.Size = new Size(580, 180);
+            lvOpenedItems.Size = new Size(WorkListWidth, 180);
             lvOpenedItems.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             lvOpenedItems.View = View.Details;
             lvOpenedItems.CheckBoxes = true;
             lvOpenedItems.FullRowSelect = true;
             lvOpenedItems.GridLines = true;
-            lvOpenedItems.Columns.Add("이름", 150);
+            // 첫 번째 열의 왼쪽 여백은 전체 선택 체크박스가 표시되는 자리다.
+            lvOpenedItems.Columns.Add("    이름", 150);
             lvOpenedItems.Columns.Add("종류", 60);
             lvOpenedItems.Columns.Add("경로", 280);
             lvOpenedItems.Columns.Add("상태", 70);
+            lvOpenedItems.ItemChecked += lvOpenedItems_ItemChecked;
             pnlOpened.Controls.Add(lvOpenedItems);
+
+            chkToggleAllOpenedItems = new CheckBox();
+            chkToggleAllOpenedItems.Location = new Point(4, 23);
+            chkToggleAllOpenedItems.Size = new Size(16, 16);
+            chkToggleAllOpenedItems.Text = "";
+            chkToggleAllOpenedItems.TabStop = false;
+            chkToggleAllOpenedItems.Enabled = false;
+            chkToggleAllOpenedItems.Click += chkToggleAllOpenedItems_Click;
+            pnlOpened.Controls.Add(chkToggleAllOpenedItems);
 
             // 현재 열린 목록 조작 버튼들
             FlowLayoutPanel pnlOpenActions = new FlowLayoutPanel();
-            pnlOpenActions.Location = new Point(590, 20);
-            pnlOpenActions.Size = new Size(180, 180);
+            pnlOpenActions.Location = new Point(ActionPanelLeft, 20);
+            pnlOpenActions.Size = new Size(ActionButtonWidth, 220);
             pnlOpenActions.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
             pnlOpenActions.FlowDirection = FlowDirection.TopDown;
-            // 공간이 부족해도 다음 열로 줄바꿈하지 않아 선택 버튼 옆에 다른 버튼이 겹쳐 보이지 않게 한다.
             pnlOpenActions.WrapContents = false;
-            pnlOpenActions.AutoScroll = true;
+            pnlOpenActions.AutoScroll = false;
             pnlOpened.Controls.Add(pnlOpenActions);
 
-            btnSelectAll = CreateButton("전체 선택", new Size(160, 28));
-            btnSelectAll.Click += (s, e) => CheckAllOpenedItems(true);
-            pnlOpenActions.Controls.Add(btnSelectAll);
-
-            btnDeselectAll = CreateButton("전체 해제", new Size(160, 28));
-            btnDeselectAll.Click += (s, e) => CheckAllOpenedItems(false);
-            pnlOpenActions.Controls.Add(btnDeselectAll);
-
-            btnAddFile = CreateButton("파일 추가", new Size(160, 28));
+            btnAddFile = CreateButton("파일 추가", new Size(ActionButtonWidth, 30));
             btnAddFile.Click += btnAddFile_Click;
             pnlOpenActions.Controls.Add(btnAddFile);
 
-            btnAddFolder = CreateButton("폴더 추가", new Size(160, 28));
+            btnAddFolder = CreateButton("폴더 추가", new Size(ActionButtonWidth, 30));
             btnAddFolder.Click += btnAddFolder_Click;
             pnlOpenActions.Controls.Add(btnAddFolder);
 
-            btnAddBrowser = CreateButton("브라우저 URL 추가", new Size(160, 28));
+            btnAddBrowser = CreateButton("브라우저 URL 추가", new Size(ActionButtonWidth, 30));
             btnAddBrowser.Click += btnAddBrowser_Click;
             pnlOpenActions.Controls.Add(btnAddBrowser);
 
-            btnRemoveSelected = CreateButton("목록에서 삭제", new Size(160, 28));
+            btnRemoveSelected = CreateButton("목록에서 삭제", new Size(ActionButtonWidth, 30));
             btnRemoveSelected.Click += btnRemoveSelected_Click;
             pnlOpenActions.Controls.Add(btnRemoveSelected);
 
-            btnCaptureNow = CreateButton("현재 상태 다시 캡처", new Size(160, 28));
+            btnCaptureNow = CreateButton("현재 상태 다시 캡처", new Size(ActionButtonWidth, 30));
             btnCaptureNow.Click += (s, e) => RefreshOpenWindows();
             btnCaptureNow.BackColor = Color.FromArgb(240, 240, 240);
             pnlOpenActions.Controls.Add(btnCaptureNow);
@@ -233,38 +241,47 @@ namespace WorkOnOff
 
             txtMemo = new TextBox();
             txtMemo.Location = new Point(0, 25);
-            txtMemo.Size = new Size(450, 75);
+            // 위의 현재 업무 목록과 같은 오른쪽 여백을 사용해 가로 폭을 맞춘다.
+            txtMemo.Size = new Size(WorkListWidth, 75);
             txtMemo.Multiline = true;
             txtMemo.ScrollBars = ScrollBars.Vertical;
             txtMemo.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             pnlSave.Controls.Add(txtMemo);
 
+            // 메모 저장/수정 동작은 위의 파일 추가 버튼처럼 오른쪽에 세로로 배치한다.
+            FlowLayoutPanel pnlSaveActions = new FlowLayoutPanel();
+            pnlSaveActions.Location = new Point(ActionPanelLeft, 25);
+            pnlSaveActions.Size = new Size(ActionButtonWidth, 75);
+            pnlSaveActions.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+            pnlSaveActions.FlowDirection = FlowDirection.TopDown;
+            pnlSaveActions.WrapContents = false;
+            pnlSaveActions.AutoScroll = false;
+            pnlSave.Controls.Add(pnlSaveActions);
+
             btnSaveNextDay = new Button();
             btnSaveNextDay.Text = "다음날 하기"; // (정확히 요구사항 반영)
-            btnSaveNextDay.Location = new Point(460, 25);
-            btnSaveNextDay.Size = new Size(150, 75);
-            btnSaveNextDay.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
-            btnSaveNextDay.Font = new Font("맑은 고딕", 12F, FontStyle.Bold);
+            btnSaveNextDay.Size = new Size(ActionButtonWidth, 35);
+            btnSaveNextDay.Margin = new Padding(0, 0, 0, 4);
+            btnSaveNextDay.Font = new Font("맑은 고딕", ActionButtonFontSize, FontStyle.Bold);
             btnSaveNextDay.BackColor = Color.FromArgb(41, 128, 185);
             btnSaveNextDay.ForeColor = Color.White;
             btnSaveNextDay.FlatStyle = FlatStyle.Flat;
             btnSaveNextDay.FlatAppearance.BorderSize = 0;
             btnSaveNextDay.Click += btnSaveNextDay_Click;
-            pnlSave.Controls.Add(btnSaveNextDay);
+            pnlSaveActions.Controls.Add(btnSaveNextDay);
 
             btnUpdateSession = new Button();
-            btnUpdateSession.Text = "현재 상태로\n업데이트";
-            btnUpdateSession.Location = new Point(620, 25);
-            btnUpdateSession.Size = new Size(150, 75);
-            btnUpdateSession.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
-            btnUpdateSession.Font = new Font("맑은 고딕", 11F, FontStyle.Bold);
+            btnUpdateSession.Text = "아래 업무메모 선택 후 수정반영";
+            btnUpdateSession.Size = new Size(ActionButtonWidth, 35);
+            btnUpdateSession.Margin = new Padding(0);
+            btnUpdateSession.Font = new Font("맑은 고딕", ActionButtonFontSize, FontStyle.Bold);
             btnUpdateSession.BackColor = Color.FromArgb(39, 174, 96);
             btnUpdateSession.ForeColor = Color.White;
             btnUpdateSession.FlatStyle = FlatStyle.Flat;
             btnUpdateSession.FlatAppearance.BorderSize = 0;
             btnUpdateSession.Enabled = false;
             btnUpdateSession.Click += btnUpdateSession_Click;
-            pnlSave.Controls.Add(btnUpdateSession);
+            pnlSaveActions.Controls.Add(btnUpdateSession);
 
             // 4. 최근 저장 업무 목록 영역
             Panel pnlSaved = new Panel();
@@ -280,7 +297,7 @@ namespace WorkOnOff
 
             lvSavedSessions = new ListView();
             lvSavedSessions.Location = new Point(0, 25);
-            lvSavedSessions.Size = new Size(580, 125);
+            lvSavedSessions.Size = new Size(WorkListWidth, 125);
             lvSavedSessions.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             lvSavedSessions.View = View.Details;
             lvSavedSessions.FullRowSelect = true;
@@ -293,33 +310,44 @@ namespace WorkOnOff
             lvSavedSessions.DoubleClick += (s, e) => ResumeSelectedSession();
             pnlSaved.Controls.Add(lvSavedSessions);
 
-            FlowLayoutPanel pnlSavedActions = new FlowLayoutPanel();
-            pnlSavedActions.Location = new Point(590, 25);
-            pnlSavedActions.Size = new Size(180, 125);
+            // 세 버튼을 저장 업무 목록과 같은 높이로 나누어 표시한다.
+            TableLayoutPanel pnlSavedActions = new TableLayoutPanel();
+            pnlSavedActions.Location = new Point(ActionPanelLeft, 25);
+            pnlSavedActions.Size = new Size(ActionButtonWidth, 125);
             pnlSavedActions.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
-            pnlSavedActions.FlowDirection = FlowDirection.TopDown;
+            pnlSavedActions.ColumnCount = 1;
+            pnlSavedActions.RowCount = 3;
+            pnlSavedActions.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333F));
+            pnlSavedActions.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333F));
+            pnlSavedActions.RowStyles.Add(new RowStyle(SizeType.Percent, 33.334F));
             pnlSaved.Controls.Add(pnlSavedActions);
 
-            btnResume = CreateButton("업무 이어하기", new Size(160, 32));
-            btnResume.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            btnResume = CreateButton("업무 이어하기", new Size(ActionButtonWidth, 32));
+            btnResume.Dock = DockStyle.Fill;
+            btnResume.Margin = new Padding(0, 0, 0, 4);
+            btnResume.Font = new Font("맑은 고딕", ActionButtonFontSize, FontStyle.Bold);
             btnResume.BackColor = Color.FromArgb(46, 204, 113);
             btnResume.ForeColor = Color.White;
             btnResume.FlatStyle = FlatStyle.Flat;
             btnResume.FlatAppearance.BorderSize = 0;
             btnResume.Click += (s, e) => ResumeSelectedSession();
-            pnlSavedActions.Controls.Add(btnResume);
+            pnlSavedActions.Controls.Add(btnResume, 0, 0);
 
-            btnViewDetails = CreateButton("내용 보기", new Size(160, 30));
+            btnViewDetails = CreateButton("내용 보기", new Size(ActionButtonWidth, 30));
+            btnViewDetails.Dock = DockStyle.Fill;
+            btnViewDetails.Margin = new Padding(0, 0, 0, 4);
             btnViewDetails.Click += btnViewDetails_Click;
-            pnlSavedActions.Controls.Add(btnViewDetails);
+            pnlSavedActions.Controls.Add(btnViewDetails, 0, 1);
 
-            btnDeleteSession = CreateButton("삭제", new Size(160, 30));
+            btnDeleteSession = CreateButton("삭제", new Size(ActionButtonWidth, 30));
+            btnDeleteSession.Dock = DockStyle.Fill;
+            btnDeleteSession.Margin = new Padding(0);
             btnDeleteSession.BackColor = Color.FromArgb(231, 76, 60);
             btnDeleteSession.ForeColor = Color.White;
             btnDeleteSession.FlatStyle = FlatStyle.Flat;
             btnDeleteSession.FlatAppearance.BorderSize = 0;
             btnDeleteSession.Click += btnDeleteSession_Click;
-            pnlSavedActions.Controls.Add(btnDeleteSession);
+            pnlSavedActions.Controls.Add(btnDeleteSession, 0, 2);
         }
 
         private Button CreateButton(string text, Size size)
@@ -327,6 +355,7 @@ namespace WorkOnOff
             Button btn = new Button();
             btn.Text = text;
             btn.Size = size;
+            btn.Font = new Font("맑은 고딕", ActionButtonFontSize, FontStyle.Regular);
             btn.Margin = new Padding(0, 0, 0, 6);
             btn.FlatStyle = FlatStyle.Flat;
             btn.BackColor = Color.FromArgb(245, 245, 245);
@@ -366,6 +395,7 @@ namespace WorkOnOff
 
         private void PopulateOpenedList()
         {
+            isUpdatingToggleAllCheckBox = true;
             lvOpenedItems.Items.Clear();
             foreach (var item in currentDetectedItems)
             {
@@ -383,14 +413,53 @@ namespace WorkOnOff
 
                 lvOpenedItems.Items.Add(lvi);
             }
+            isUpdatingToggleAllCheckBox = false;
+            UpdateToggleAllOpenedItemsCheckBox();
         }
 
         private void CheckAllOpenedItems(bool check)
         {
+            isUpdatingToggleAllCheckBox = true;
             foreach (ListViewItem item in lvOpenedItems.Items)
             {
                 item.Checked = check;
             }
+            isUpdatingToggleAllCheckBox = false;
+            UpdateToggleAllOpenedItemsCheckBox();
+        }
+
+        private void chkToggleAllOpenedItems_Click(object sender, EventArgs e)
+        {
+            CheckAllOpenedItems(chkToggleAllOpenedItems.Checked);
+        }
+
+        private void lvOpenedItems_ItemChecked(object sender, ItemCheckedEventArgs e)
+        {
+            if (isUpdatingToggleAllCheckBox) return;
+
+            // ItemChecked 이벤트 시점에는 ListView의 Checked 상태가 갱신되기 전일 수 있다.
+            BeginInvoke(new MethodInvoker(UpdateToggleAllOpenedItemsCheckBox));
+        }
+
+        private void UpdateToggleAllOpenedItemsCheckBox()
+        {
+            if (chkToggleAllOpenedItems == null) return;
+
+            bool hasItems = lvOpenedItems.Items.Count > 0;
+            bool areAllItemsChecked = hasItems;
+            foreach (ListViewItem item in lvOpenedItems.Items)
+            {
+                if (!item.Checked)
+                {
+                    areAllItemsChecked = false;
+                    break;
+                }
+            }
+
+            isUpdatingToggleAllCheckBox = true;
+            chkToggleAllOpenedItems.Enabled = hasItems;
+            chkToggleAllOpenedItems.Checked = areAllItemsChecked;
+            isUpdatingToggleAllCheckBox = false;
         }
 
         private void btnAddFile_Click(object sender, EventArgs e)
@@ -553,22 +622,46 @@ namespace WorkOnOff
                 MessageBox.Show(string.Format("현재 업무 {0}개를 저장했습니다.", selectedItems.Count), 
                     "업무 저장 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                DialogResult closeResult = MessageBox.Show(
-                    "저장된 업무의 문서와 폴더 창을 종료하시겠습니까?\n" +
-                    "(브라우저 탭은 자동 종료하지 않으며, 저장되지 않은 작업은 종료 중 저장할 수 있습니다.)",
-                    "프로그램 종료 확인",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question
-                );
+                DialogResult closeResult;
+                using (ShutdownConfirmationForm confirmationForm = new ShutdownConfirmationForm())
+                {
+                    closeResult = confirmationForm.ShowDialog(this);
+                }
 
                 if (closeResult == DialogResult.Yes)
                 {
                     CloseSavedApplications(selectedItems);
+                    if (RequestComputerShutdown())
+                    {
+                        return;
+                    }
                 }
 
                 txtMemo.Clear();
                 LoadData();
                 RefreshOpenWindows();
+            }
+        }
+
+        private bool RequestComputerShutdown()
+        {
+            try
+            {
+                ProcessStartInfo shutdownInfo = new ProcessStartInfo();
+                shutdownInfo.FileName = Path.Combine(Environment.SystemDirectory, "shutdown.exe");
+                shutdownInfo.Arguments = "/s /t 0";
+                shutdownInfo.UseShellExecute = false;
+                shutdownInfo.CreateNoWindow = true;
+                Process.Start(shutdownInfo);
+                Logger.Write("사용자 선택에 따라 컴퓨터 종료 요청을 전송했습니다.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Write("컴퓨터 종료 요청 실패: " + ex.Message, "ERROR");
+                MessageBox.Show("문서와 창은 닫았지만 컴퓨터 종료 요청에 실패했습니다.\n" + ex.Message,
+                    "컴퓨터 종료 실패", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
             }
         }
 
@@ -913,6 +1006,57 @@ namespace WorkOnOff
             }
         }
 
+    }
+
+    // '다음날 하기' 저장 후 표시하는 종료 방식 선택 창
+    public class ShutdownConfirmationForm : Form
+    {
+        public ShutdownConfirmationForm()
+        {
+            this.Text = "저장 후 처리 선택";
+            this.ClientSize = new Size(620, 320);
+            this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.ShowInTaskbar = false;
+
+            Label message = new Label();
+            message.Text = "저장된 업무를 어떻게 처리할까요?\n\n" +
+                "예를 누르면 모든 문서와 폴더 창을 닫고 컴퓨터를 종료합니다.\n" +
+                "아니오를 누르면 내일 할 일만 저장하고 컴퓨터는 종료하지 않습니다.\n\n" +
+                "저장되지 않은 문서는 종료 과정에서 저장 여부를 확인할 수 있습니다.";
+            message.Location = new Point(20, 18);
+            message.Size = new Size(580, 135);
+            message.TextAlign = ContentAlignment.TopLeft;
+            this.Controls.Add(message);
+
+            Button btnYes = new Button();
+            btnYes.Text = "예 - 모든 문서·창 닫고 컴퓨터 종료";
+            btnYes.Location = new Point(20, 165);
+            btnYes.Size = new Size(580, 46);
+            btnYes.Font = new Font("맑은 고딕", 10F, FontStyle.Bold);
+            btnYes.BackColor = Color.FromArgb(231, 76, 60);
+            btnYes.ForeColor = Color.White;
+            btnYes.FlatStyle = FlatStyle.Flat;
+            btnYes.FlatAppearance.BorderSize = 0;
+            btnYes.DialogResult = DialogResult.Yes;
+            this.Controls.Add(btnYes);
+
+            Button btnNo = new Button();
+            btnNo.Text = "아니오 - 내일 할 일만 저장 (컴퓨터 안 끔)";
+            btnNo.Location = new Point(20, 222);
+            btnNo.Size = new Size(580, 46);
+            btnNo.Font = new Font("맑은 고딕", 10F, FontStyle.Bold);
+            btnNo.FlatStyle = FlatStyle.Flat;
+            btnNo.BackColor = Color.FromArgb(245, 245, 245);
+            btnNo.FlatAppearance.BorderColor = Color.LightGray;
+            btnNo.DialogResult = DialogResult.No;
+            this.Controls.Add(btnNo);
+
+            this.CancelButton = btnNo;
+        }
     }
 
     // 세션 상세 보기 UI
